@@ -281,6 +281,7 @@ class JointsDataset(Dataset):
                 if v > 0.5:
                     target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                         g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+        ##使用坐标，而不是高斯热图
         else:
             target = np.array(joints[:, 0:2] / self.image_size, dtype=np.float32)
 
