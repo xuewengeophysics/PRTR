@@ -3,29 +3,11 @@
 + Paper: [Pose Recognition with Cascade Transformers](https://arxiv.org/abs/2104.06976)
 + Code: [mlpc-ucsd/PRTR](https://github.com/mlpc-ucsd/PRTR)
 
+## 0. Summary Keywords
 
-
-query是啥？输入有  输出也有
-
-
-
-|      |         TransPose          |                 PRTR                  |
-| ---- | :------------------------: | :-----------------------------------: |
-|      |       heatmap-based        |           regression-based            |
-|      | discrete coordinate system |      continuous coordinate space      |
-|      |     two-stage process      | two-stage process, end-to-end fashion |
-|      |  only transformer encoder  |      transformer encoder-decoder      |
-|      |                            |                                       |
-
-
-
-Spatial Transformer Network (STN)   是啥？
-
-each query dynamically predicts its preferred keypoint type？ 
-
-
-
-先把两阶段模型中的关键点检测训练
++ end-to-end
++ unified model for multi-person keypoint
++ interpretable
 
 ## 1. Introduction
 
@@ -33,21 +15,27 @@ each query dynamically predicts its preferred keypoint type？
 
 #### 	1.1.1 Motivation
 
-+ 基于热图的关键点检测方法需要各种启发式设计，大多数情况下不能做到端到端；而基于回归的方法具有较少的不可微分的中间过程，它去除了一些复杂的前/后处理步骤、需要的启发式设计更少。(In general, heatmap-based methods achieve higher accuracy but are subject to various heuristic designs (not end-to-end mostly), whereas regression-based approaches attain relatively lower accuracy but they have less intermediate non-differentiable steps. It removes complex pre/post-processing procedures and requires fewer heuristic designs compared with existing heatmap-based approaches.)
++ 基于热图的关键点检测方法需要各种启发式设计，大多数情况下**不能做到端到端**；而基于回归的方法具有较少的不可微分的中间过程，它去除了一些复杂的前处理/后处理步骤、需要的启发式设计更少。(In general, heatmap-based methods achieve higher accuracy but are subject to various **heuristic designs** (not end-to-end mostly), whereas regression-based approaches attain relatively lower accuracy but they have less intermediate non-differentiable steps. It removes complex pre/post-processing procedures and requires fewer heuristic designs compared with existing heatmap-based approaches.)
 
 #### 1.1.2 Challenges
 
-+ 
++ 姿态估计(关键点检测)存在这些难点：姿态/形状变化大、人体自遮挡、外观变化大、背景杂乱等方面(The difficulty lies in various aspects such as large pose/shape variation, inter-person and self occlusion, large appearance variation, and background clutter.)（本论文并没有针对这些难点提出特别的处理方案。）
+
+### 1.2 What
+
++ **cascade Transformers**:
+  + two-stage process: （我更倾向于称为two-model process；Faster-RCNN是一个二阶段的目标检测模型，它是1个模型；PRTR论文中的“two-stage process”是2个模型：人体检测和人体关键点检测）
+  + sequential end-to-end process:（1个模型2个任务一起训练：人体检测和人体关键点检测）
 
 ### 1.3 How
 
-+ 
++ 本文使用DETR的基本框架，采用逐步回归的方式生成关键点。
 
 ### 1.4 Contributions
 
-+ 
-
-
++ 提出了一种基于回归的关键点检测方法**Pose Regression TRansformer(PRTR)**，通过搭建级联Transformers网络结构，这种方法基于一种通用的端到端目标检测方法**DETR**。这种方法能同时捕捉关键点的空间和外观特征。(We propose a regression-based human pose recognition method by building cascade Transformers, based on a general-purpose object detector, end-to-end object detection Transformer (DETR) [3]. Our method, named pose recognition Transformer (PRTR), enjoys the tokenized representation in Transformers with layers of selfattention to capture the joint spatial and appearance modeling for the keypoints.)
++ 两种方案：two-stage、端到端。(Two types of cascade Transformers have been developed: 1). a two-stage one with the second Transformer taking image patches detected from the first Transformer, as shown in Figure 2; and 2). a sequential one using spatial Transformer network (STN) [16] to create an end-to-end framework, shown in Figure 3.)
++ 可视化关键点查询的分布、揭开Transformer内部过程中检测逐渐细化的过程，为揭示 Transformer 解码器内部机制开辟了道路。(We visualize the distribution of keypoint queries in various aspects to unfold the internal process of the Transformer for the gradual refinement of the detection.)
 
 ### 1.5 Future works
 
@@ -56,11 +44,19 @@ each query dynamically predicts its preferred keypoint type？
 
 
 
-## 2. Approach
+## 2. Method
+
++ two stage
+
+![image-20210525114333208](C:\Users\86138\AppData\Roaming\Typora\typora-user-images\image-20210525114333208.png)  
+
++ end-to-end
+
+![image-20210525114415209](C:\Users\86138\AppData\Roaming\Typora\typora-user-images\image-20210525114415209.png)  
 
 
 
-## 3. Code=f(method)
+## 3. Code=f(method) Two-stage
 
 + 以COCO train2017 dataset为例：
 
@@ -230,10 +226,6 @@ two_stage/lib/dataset/JointsDataset.py
 else:
 	target = np.array(joints[:, 0:2] / self.image_size, dtype=np.float32)
 ```
-
-疑问：如果使用高斯热图，效果如何呢？与TransPose相比？
-
-
 
 ### 3.2 Process
 
@@ -619,25 +611,116 @@ class TransformerDecoderLayer(nn.Module):
 
 ### 3.3 Output
 
++ 神经网络的输出是output
+
 two_stage/lib/core/function.py
 
 ```python
-preds, maxvals, pred = get_final_preds_match(config, output, c, s)
+outputs = model(input)
+output = outputs
+```
+
+two_stage/lib/models/pose_transformer.py
+
+```python
+out = {'pred_logits': outputs_class[-1],  ##out['pred_logits']的维度是[BS, NUM_QUERIES, NUM_JOINTS+1]，表示query和关键点的匹配程度吗？
+       'pred_coords': outputs_coord[-1]}  ##out['pred_coords']的维度是[BS, NUM_QUERIES, 2]
+```
+
+**疑问：output与output query是什么关系呢？output query维度是多少？作用是什么？**
+
++ output query
+
+two_stage/lib/models/pose_transformer.py
+
+```python
+self.query_embed = nn.Embedding(self.num_queries, hidden_dim)  ##cfg.MODEL.EXTRA.NUM_QUERIES为100，cfg.MODEL.EXTRA.HIDDEN_DIM为256
+```
+
+**疑问：NUM_QUERIES是100，NUM_JOINTS是17，如何匹配的呢？匈牙利算法？**
+
+
+
+two_stage/lib/core/function.py
+
+```python
+def validate(config, val_loader, val_dataset, model, criterion, output_dir,
+             tb_log_dir, writer_dict=None):
+    batch_time = AverageMeter()
+    metrics_dict = {}
+
+    def add_to_metrics(name, val, cnt):
+        if name not in metrics_dict.keys():
+            metrics_dict[name] = AverageMeter()
+        metrics_dict[name].update(val, cnt)
+
+    # switch to evaluate mode
+    model.eval()
+    criterion.eval()
+
+    num_samples = len(val_dataset)
+    all_preds = np.zeros(
+        (num_samples, config.MODEL.NUM_JOINTS, 3),
+        dtype=np.float32
+    )
+    all_boxes = np.zeros((num_samples, 6))
+    image_path = []
+    filenames = []
+    imgnums = []
+    idx = 0
+    image_size = np.array(config.MODEL.IMAGE_SIZE)
+    with torch.no_grad():
+        end = time.time()
+
+        for i, (input, target, target_weight, meta) in enumerate(val_loader):
+            num_images = input.size(0)
+            # compute output
+            outputs = model(input)
+            target = target.cuda(non_blocking=True)
+            target_weight = target_weight.cuda(non_blocking=True)
+
+            output = outputs
+
+            loss_dict, _ = criterion(outputs, target, target_weight)
+            weight_dict = criterion.weight_dict
+            loss = sum(loss_dict[k] * weight_dict[k]
+                    for k in loss_dict.keys() if k in weight_dict)
+
+            bs = input.size(0)
+            for k, v in loss_dict.items():
+                add_to_metrics(f'{k}_unscaled', v.item(), bs)
+                if k in weight_dict:
+                    add_to_metrics(k, (v * weight_dict[k]).item(), bs)
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            c = meta['center'].numpy()
+            s = meta['scale'].numpy()
+            score = meta['score'].numpy()
+
+            ##preds的维度是[BS, NUM_JOINTS, 2]
+            ##maxvals的维度是[BS, NUM_JOINTS, 1]
+            ##pred的维度是[BS, NUM_JOINTS, 2]
+            preds, maxvals, pred = get_final_preds_match(
+                config, output, c, s
+            )
 ```
 
 two_stage/lib/core/inference.py
 
 ```python
 def get_final_preds_match(config, outputs, center, scale, flip_pairs=None):
-    pred_logits = outputs['pred_logits'].detach().cpu()
-    pred_coords = outputs['pred_coords'].detach().cpu()
+    pred_logits = outputs['pred_logits'].detach().cpu()  ##out['pred_logits']的维度是[BS, NUM_QUERIES, NUM_JOINTS+1]
+    pred_coords = outputs['pred_coords'].detach().cpu()  ##out['pred_coords']的维度是[BS, NUM_QUERIES, 2]
 
     num_joints = pred_logits.shape[-1] - 1
 
     if config.TEST.INCLUDE_BG_LOGIT:
         prob = F.softmax(pred_logits, dim=-1)[..., :-1]
     else:
-        prob = F.softmax(pred_logits[..., :-1], dim=-1)
+        prob = F.softmax(pred_logits[..., :-1], dim=-1)  ##prob的维度是[BS, NUM_QUERIES, NUM_JOINTS]
 
     score_holder = []
     coord_holder = []
@@ -662,14 +745,20 @@ def get_final_preds_match(config, outputs, center, scale, flip_pairs=None):
     return matched_coord, matched_score, np.stack(orig_coord)
 ```
 
+**疑问：为什么pred_logits的每一行都基本一样呢？且前4列比第5列小这么多呢？**
 
+
+
+## 4. Code=f(method) Sequential
+
++ 待深入研究后再补充
 
 ## 参考资料
 
-1. [Pose Recognition with Cascade Transformers 论文笔记](https://www.yuque.com/jinluzhang/researchblog/prtr)
-2. [【CVPR 2021】PRTR：基于transformer的2D Human Pose Estimation](https://zhuanlan.zhihu.com/p/368067142)
+1. [搞懂 Vision Transformer 原理和代码，看这篇技术综述就够了](https://mp.weixin.qq.com/s?__biz=MzI5MDUyMDIxNA==&mid=2247531914&idx=1&sn=3b8d0b4d3821c64e9051a4d645467995&chksm=ec1c9073db6b1965d69cdd29d40d51b0148121135e0e73030d099f23deb2ff58fa4558507ab8&scene=178&cur_album_id=1685054606675902466#rd)
+2. [Pose Recognition with Cascade Transformers 论文笔记](https://www.yuque.com/jinluzhang/researchblog/prtr)
 
 
 
-更新于2021-05-15
+更新于2021-05-28
 
